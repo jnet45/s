@@ -156,7 +156,7 @@
 
         gate.hidden = false;
         msg.textContent =
-          '載入失敗，請重試。若持續失敗，請聯絡老師。';
+          '載入失敗：' + (error.message || '請稍後再試');
       } finally {
         loading = false;
         btn.disabled = false;

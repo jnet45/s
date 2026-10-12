@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>課程入口</title>
+
+  <style>
+    /* 入口樣式限定在 #entry 內 */
+    #entry {
+      box-sizing: border-box;
+      max-width: 420px;
+      margin: 48px auto;
+      padding: 24px;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background: #fff;
+      color: #222;
+    }
+
+    #entry[hidden],
+    #entry [hidden] {
+      display: none !important;
+    }
+
+    #entry h1 {
+      margin: 0 0 20px;
+      font-size: 24px;
+    }
+
+    #entry input,
+    #entry button {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 12px;
+      margin-top: 12px;
+      font-size: 16px;
+    }
+
+    #entry #msg {
+      min-height: 24px;
+      margin-top: 16px;
+      color: #b00020;
+    }
+
+    #entry button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+  </style>
+
+  <!-- Prism：核心、Python、Line Numbers -->
+  <link rel="stylesheet" href="prism/prism.css">
+  <link rel="stylesheet" href="prism/prism-line-numbers.css">
+
+  <script src="prism/prism.js" defer></script>
+  <script src="prism/prism-python.js" defer></script>
+  <script src="prism/prism-line-numbers.js" defer></script>
+</head>
+
+<body>
+  <section id="entry">
+    <h1>課程入口</h1>
+
+    <div id="gate" hidden>
+      <form id="password-form">
+        <label for="pw">目前非開放時間，請輸入密碼</label>
+
+        <input
+          id="pw"
+          type="password"
+          placeholder="密碼"
+          autocomplete="off"
+          required
+        >
+
+        <button id="btn" type="submit">確認</button>
+      </form>
+    </div>
+
+    <p id="msg" role="status" aria-live="polite">載入中…</p>
+  </section>
+
+  <main id="content"></main>
+
+  <script>
+    const GAS_URL = '請貼上你的 GAS /exec 部署網址';
+
+    const entry = document.getElementById('entry');
+    const gate = document.getElementById('gate');
+    const form = document.getElementById('password-form');
+    const pw = document.getElementById('pw');
+    const btn = document.getElementById('btn');
+    const msg = document.getElementById('msg');
+    const content = document.getElementById('content');
+
+    let loading = false;
+
+    async function loadContent(password) {
+      if (loading) return;
+
+      loading = true;
+      btn.disabled = true;
+      msg.textContent = '載入中…';
+
+      try {
+        const url = new URL(GAS_URL);
+
+        if (password !== undefined) {
+          url.searchParams.set('pw', password);
+        }
+
+        // 避免沿用相同請求網址
+        url.searchParams.set('_', Date.now().toString());
+
+        const response = await fetch(url.toString(), {
+          method: 'GET',
+          redirect: 'follow',
+          credentials: 'omit'
+        });
+
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status);
+        }
+
+        const data = await response.json();
+
+        if (data.status === 'need_password') {
+          gate.hidden = false;
+          msg.textContent = '';
+          pw.focus();
+          return;
+        }
+
+        if (data.status === 'ok' || data.status === 'fail') {
+          if (typeof data.html !== 'string') {
+            throw new Error('後端未回傳 HTML 內容');
+          }
+
+          // HTML 當作片段注入目前頁面
+          content.innerHTML = data.html;
+
+          // 成功、失敗頁都由注入內容呈現
+          entry.hidden = true;
+          pw.value = '';
+
+          highlightContent();
+
+          return;
+        }
+
+        throw new Error(data.message || '後端回傳格式不正確');
+      } catch (error) {
+        console.error(error);
+
+        gate.hidden = false;
+        msg.textContent =
+          '載入失敗，請重試。若持續失敗，請聯絡老師。';
+      } finally {
+        loading = false;
+        btn.disabled = false;
+      }
+    }
+
+    function highlightContent() {
+      if (window.Prism) {
+        Prism.highlightAllUnder(content);
+      }
+    }
+
+    // 若內容比 Prism 更早載入，待頁面載入完成再標示一次
+    document.addEventListener('DOMContentLoaded', highlightContent);
+
+    form.addEventListener('submit', function(event) {
+      event.preventDefault();
+
+      // 原樣送出學生輸入，驗證只在 GAS 執行
+      loadContent(pw.value);
+    });
+
+    // document 事件委派：
+    // 之後由 innerHTML 注入的按鈕也能被偵測
+    document.addEventListener('click', function(event) {
+      if (!(event.target instanceof Element)) return;
+
+      const button = event.target.closest('.fold-btn, .lock-btn');
+
+      if (!button || !content.contains(button)) return;
+
+      event.preventDefault();
+
+      if (button.matches('.fold-btn')) {
+        // 後續加入：
+        // 首次點擊等待 30 秒，再次點擊才展開。
+        // 成功載入後保留內容，不重新請求 GAS。
+        return;
+      }
+
+      if (button.matches('.lock-btn')) {
+        // 後續加入：
+        // 向 GAS 驗證，通過後才取得 Python。
+        return;
+      }
+    });
+
+    // 首次不送密碼，由 GAS 判斷是否為開放時間
+    loadContent();
+  </script>
+</body>
+</html>

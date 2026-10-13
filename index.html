@@ -71,7 +71,7 @@
       DOMParser 拆解後，用 innerHTML 放進 #content
       GitHub 上的 p10.html 不會被讀取；GitHub 只提供圖片
     */
-    const GAS_URL = 'https://script.google.com/macros/s/AKfycbxhP9h22Hqurrfv5J7_KyqahTVAfkb-JNukNk43N6APIlI_tLH_ABLIvq5AjaTB8sY/exec';
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbzMBuTJN1MhrceVlxJdE8YHQr8f6h17knTJy6kTBRcQch-i2zHgljaINhU5qUNyYLE/exec';
 
     // 只保存已被 GAS 接受的學生輸入值與目前頁面
     const PASS_KEY = 'pass_pw';
@@ -108,6 +108,52 @@
       document.title = '課程入口';
     }
 
+    // 還原 Google Docs 匯出的轉址連結
+    // google.com/url?q=https://jnet45.github.io/s/?p%3Dp10&sa=D&...
+    // → ./?p=p10
+    function restoreLinks(doc) {
+      doc.querySelectorAll('a[href]').forEach(link => {
+        try {
+          const url = new URL(
+            link.getAttribute('href'),
+            location.href
+          );
+
+          if (
+            url.hostname !== 'www.google.com' ||
+            url.pathname !== '/url'
+          ) {
+            return;
+          }
+
+          // searchParams 會自動把 %3D 還原成 =
+          const target =
+            url.searchParams.get('q') ||
+            url.searchParams.get('url');
+
+          if (!target) return;
+
+          const targetUrl = new URL(target, location.href);
+
+          const isEntry =
+            targetUrl.origin === location.origin &&
+            ['/s/', '/s/index.html', '/s/index.htm']
+              .includes(targetUrl.pathname) &&
+            targetUrl.searchParams.has('p');
+
+          link.setAttribute(
+            'href',
+            isEntry
+              ? './?p=' +
+                encodeURIComponent(targetUrl.searchParams.get('p'))
+              : target
+          );
+        } catch {
+          // 網址格式異常就保持原樣
+        }
+      });
+    }
+
     // 解析完整 HTML，只注入樣式與 body 內容
     function showHtml(html, title, dir) {
       const doc = new DOMParser().parseFromString(
@@ -129,6 +175,9 @@
         }
       });
 
+      // 還原 Google 轉址連結
+      restoreLinks(doc);
+
       // images/a.png → p10/images/a.png
       if (dir) {
         doc.querySelectorAll('img[src]').forEach(img => {
@@ -143,14 +192,21 @@
         });
       }
 
-      // 換頁時，舊樣式會與舊內容一起被取代
+      // 樣式中的 body 規則改成只作用在 #content
       const styles = [...doc.head.querySelectorAll('style')]
-        .map(style => style.outerHTML)
+        .map(style => {
+          const css = style.textContent.replace(
+            /(^|[}\s,>+~])body(?![\w-])(?=[^{}]*\{)/g,
+            '$1#content'
+          );
+
+          return '<style>' + css + '</style>';
+        })
         .join('');
 
       content.innerHTML = styles + doc.body.innerHTML;
 
-      // 原 body 的排版搬到 #content
+      // 原 body 的 class 與排版搬到 #content
       content.className = doc.body.className;
       content.style.cssText = doc.body.style.cssText;
 

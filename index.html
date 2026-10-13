@@ -10,13 +10,11 @@
     /* 入口樣式限定在 #entry 內 */
     #entry {
       box-sizing: border-box;
-      max-width: 420px;
-      margin: 48px auto;
-      padding: 24px;
-      font-family: Arial, sans-serif;
+      max-width: 360px;
+      margin: 24px auto;
+      padding: 16px;
+      font-family: sans-serif;
       text-align: center;
-      background: #fff;
-      color: #222;
     }
 
     #entry[hidden],
@@ -24,23 +22,16 @@
       display: none !important;
     }
 
-    #entry h1 {
-      margin: 0 0 20px;
-      font-size: 24px;
-    }
-
     #entry input,
     #entry button {
       box-sizing: border-box;
       width: 100%;
-      padding: 12px;
       margin-top: 12px;
+      padding: 10px;
       font-size: 16px;
     }
 
     #entry #msg {
-      min-height: 24px;
-      margin-top: 16px;
       color: #b00020;
     }
 
@@ -49,107 +40,183 @@
       cursor: wait;
     }
   </style>
-
-  <!-- Prism：核心、Python、Line Numbers -->
-  <link rel="stylesheet" href="prism/prism.css">
-  <link rel="stylesheet" href="prism/prism-line-numbers.css">
-
-  <script src="prism/prism.js" defer></script>
-  <script src="prism/prism-python.js" defer></script>
-  <script src="prism/prism-line-numbers.js" defer></script>
 </head>
 
 <body>
   <section id="entry">
-    <h1>課程入口</h1>
+    <form id="password-form" hidden>
+      <label for="pw">請輸入入口密碼</label>
 
-    <div id="gate" hidden>
-      <form id="password-form">
-        <label for="pw">請輸入入口密碼</label>
+      <input
+        id="pw"
+        type="password"
+        autocomplete="off"
+        required
+      >
 
-        <input
-          id="pw"
-          type="password"
-          placeholder="密碼"
-          autocomplete="off"
-          required
-        >
+      <button id="btn" type="submit">確認</button>
+    </form>
 
-        <button id="btn" type="submit">確認</button>
-      </form>
-    </div>
-
-    <p id="msg" role="status" aria-live="polite">載入中…</p>
+    <p id="msg" role="status" aria-live="polite">驗證中…</p>
   </section>
 
   <main id="content"></main>
 
   <script>
-    const GAS_URL = 'https://script.google.com/macros/s/AKfycbwNbE57ZiHnv6IOqThCVMa6cwUNnykPFvfZhJSBqJLbug5RLds_JXPxllgYg74k_CY/exec';
+    /*
+      資料流向：
+      index.html ──fetch──> GAS（/exec?p=p10）
+                              └─ DriveApp 讀出 Drive 的 p10/p10.html 文字
+      index.html <──JSON──  { html: "..." }
+      DOMParser 拆解後，用 innerHTML 放進 #content
+      GitHub 上的 p10.html 不會被讀取；GitHub 只提供圖片
+    */
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbzMBuTJN1MhrceVlxJdE8YHQr8f6h17knTJy6kTBRcQch-i2zHgljaINhU5qUNyYLE/exec';
+
+    // 只保存已被 GAS 接受的學生輸入值與目前頁面
+    const PASS_KEY = 'pass_pw';
+    const PAGE_KEY = 'pass_page';
 
     const entry = document.getElementById('entry');
-    const gate = document.getElementById('gate');
     const form = document.getElementById('password-form');
     const pw = document.getElementById('pw');
     const btn = document.getElementById('btn');
     const msg = document.getElementById('msg');
     const content = document.getElementById('content');
 
+    // 先讀取 p，再清除參數，網址統一停在 /s/
+    const requestedId =
+      new URLSearchParams(location.search).get('p') || '';
+
+    history.replaceState(null, '', '/s/');
+
+    let passwordValue = sessionStorage.getItem(PASS_KEY) || '';
     let loading = false;
 
-    // 注入前修正圖片路徑：
-    // images/a.png   → p01/images/a.png
-    // ./images/a.png → p01/images/a.png
-    function prepareHtml(html, dir) {
-      if (typeof dir !== 'string' || dir === '') {
-        return html;
-      }
+    // 清除密碼與目前頁面
+    function forgetAll() {
+      passwordValue = '';
+      sessionStorage.removeItem(PASS_KEY);
+      sessionStorage.removeItem(PAGE_KEY);
+    }
 
-      const folder = dir.replace(/\/+$/, '');
-      const template = document.createElement('template');
+    // 清除注入內容及排版
+    function clearContent() {
+      content.replaceChildren();
+      content.className = '';
+      content.removeAttribute('style');
+      document.title = '課程入口';
+    }
 
-      template.innerHTML = html;
+    // 解析完整 HTML，只注入樣式與 body 內容
+    function showHtml(html, title, dir) {
+      const doc = new DOMParser().parseFromString(
+        html,
+        'text/html'
+      );
 
-      template.content.querySelectorAll('img[src]').forEach(img => {
-        const src = img.getAttribute('src');
+      // 功能 JS 統一放 index.html，不帶入 script 或 base
+      doc.querySelectorAll('script, base').forEach(
+        element => element.remove()
+      );
 
-        if (/^(?:\.\/)?images\//.test(src)) {
-          img.setAttribute(
-            'src',
-            folder + '/' + src.replace(/^\.\//, '')
-          );
+      // 移除 onclick 等行內事件
+      doc.querySelectorAll('*').forEach(element => {
+        for (const attribute of [...element.attributes]) {
+          if (/^on/i.test(attribute.name)) {
+            element.removeAttribute(attribute.name);
+          }
         }
       });
 
-      return template.innerHTML;
+      // images/a.png → p10/images/a.png
+      if (dir) {
+        doc.querySelectorAll('img[src]').forEach(img => {
+          const src = img.getAttribute('src');
+
+          if (/^(?:\.\/)?images\//.test(src)) {
+            img.setAttribute(
+              'src',
+              dir + '/' + src.replace(/^\.\//, '')
+            );
+          }
+        });
+      }
+
+      // 換頁時，舊樣式會與舊內容一起被取代
+      const styles = [...doc.head.querySelectorAll('style')]
+        .map(style => style.outerHTML)
+        .join('');
+
+      content.innerHTML = styles + doc.body.innerHTML;
+
+      // 原 body 的排版搬到 #content
+      content.className = doc.body.className;
+      content.style.cssText = doc.body.style.cssText;
+
+      document.title = title || '課程入口';
+      window.scrollTo(0, 0);
     }
 
-    // 注入後套用 Prism
-    function highlightContent() {
-      if (window.Prism) {
-        Prism.highlightAllUnder(content);
+    // 辨識 ./?p=p10 或 Google Docs 匯出的轉址連結
+    function getPageId(href) {
+      try {
+        let url = new URL(href, location.href);
+
+        if (
+          url.hostname === 'www.google.com' &&
+          url.pathname === '/url'
+        ) {
+          const target =
+            url.searchParams.get('q') ||
+            url.searchParams.get('url');
+
+          if (target) {
+            url = new URL(target, location.href);
+          }
+        }
+
+        const isEntry =
+          url.origin === location.origin &&
+          (
+            url.pathname === '/s/' ||
+            url.pathname === '/s/index.html' ||
+            url.pathname === '/s/index.htm'
+          );
+
+        return isEntry ? url.searchParams.get('p') : null;
+      } catch {
+        return null;
       }
     }
 
-    async function loadContent(password) {
+    // 每次載入都由 GAS 重新驗證
+    // id 為空：通過後注入 p01.html
+    async function loadPage(id) {
       if (loading) return;
 
       loading = true;
+
+      clearContent();
+      entry.hidden = false;
+      form.hidden = true;
       btn.disabled = true;
-      msg.textContent = '載入中…';
+      msg.textContent = '驗證中…';
 
       try {
         const url = new URL(GAS_URL);
 
-        if (password !== undefined) {
-          url.searchParams.set('pw', password);
+        if (id) {
+          url.searchParams.set('p', id);
         }
 
         url.searchParams.set('_', Date.now().toString());
 
-        const response = await fetch(url.toString(), {
-          method: 'GET',
-          redirect: 'follow',
+        if (passwordValue) {
+          url.searchParams.set('pw', passwordValue);
+        }
+
+        const response = await fetch(url, {
           credentials: 'omit'
         });
 
@@ -160,79 +227,111 @@
         const data = await response.json();
 
         if (data.status === 'need_password') {
-          gate.hidden = false;
-          msg.textContent = '目前非開放時間，請輸入密碼。';
+          forgetAll();
+
+          form.hidden = false;
+          msg.textContent = id
+            ? '尚未通過密碼，請先輸入密碼。'
+            : '請輸入密碼。';
+
           pw.focus();
           return;
         }
 
-        if (data.status === 'ok' || data.status === 'fail') {
-          if (typeof data.html !== 'string') {
-            throw new Error('後端未回傳 HTML 內容');
-          }
-
-          if (typeof data.dir !== 'string') {
-            throw new Error('後端未回傳 dir，請確認 GAS 部署版本');
-          }
-
-          // 先修正圖片路徑，再注入目前頁面
-          content.innerHTML = prepareHtml(data.html, data.dir);
-
-          entry.hidden = true;
-          pw.value = '';
-
-          highlightContent();
-          return;
+        if (data.status !== 'ok' && data.status !== 'fail') {
+          throw new Error(data.message || '頁面讀取失敗');
         }
 
-        throw new Error(data.message || '後端回傳格式不正確');
+        if (typeof data.html !== 'string') {
+          throw new Error('後端沒有回傳 HTML');
+        }
+
+        if (typeof data.dir !== 'string') {
+          throw new Error('後端沒有回傳 dir，請確認 GAS 部署版本');
+        }
+
+        showHtml(data.html, data.title, data.dir);
+
+        if (data.status === 'fail') {
+          // 密碼錯誤：注入 p09，清除紀錄
+          forgetAll();
+        } else {
+          // 通過後才記錄學生輸入值
+          if (passwordValue) {
+            sessionStorage.setItem(PASS_KEY, passwordValue);
+          }
+
+          // 有教材代號就記住，F5 嘗試回到同一頁
+          // 沒有代號表示 p01，不需額外記錄
+          if (id) {
+            sessionStorage.setItem(PAGE_KEY, id);
+          } else {
+            sessionStorage.removeItem(PAGE_KEY);
+          }
+        }
+
+        entry.hidden = true;
+        pw.value = '';
       } catch (error) {
         console.error(error);
 
-        gate.hidden = false;
-        msg.textContent =
-          '載入失敗：' + (error.message || '請稍後再試');
+        sessionStorage.removeItem(PAGE_KEY);
+
+        form.hidden = false;
+        msg.textContent = error.message;
       } finally {
         loading = false;
         btn.disabled = false;
       }
     }
 
-    // 學生輸入原樣送到 GAS，不在前端驗證
+    // 密碼框送出：通過後一律先顯示 p01
     form.addEventListener('submit', function(event) {
       event.preventDefault();
-      loadContent(pw.value);
+
+      passwordValue = pw.value;
+      loadPage('');
     });
 
-    // 事件委派：
-    // 之後由 innerHTML 注入的按鈕也能偵測
+    // document 事件委派：動態注入的按鈕與連結也有效
     document.addEventListener('click', function(event) {
       if (!(event.target instanceof Element)) return;
 
+      // 按鈕優先處理，避免被當成一般教材連結
       const button = event.target.closest('.fold-btn, .lock-btn');
 
-      if (!button || !content.contains(button)) return;
+      if (button && content.contains(button)) {
+        event.preventDefault();
 
-      event.preventDefault();
+        if (button.matches('.fold-btn')) {
+          // 後續加入：首次按下等 30 秒，再按才展開
+          return;
+        }
 
-      if (button.matches('.fold-btn')) {
-        // 後續加入：
-        // 首次點擊等待 30 秒，再次點擊才展開。
-        // 載入成功後保留內容，不重新請求 GAS。
-        return;
+        if (button.matches('.lock-btn')) {
+          // 後續加入：驗證後才回傳 Python
+          return;
+        }
       }
 
-      if (button.matches('.lock-btn')) {
-        // 後續加入：
-        // GAS 驗證通過後，才回傳 Python。
-        return;
+      const link = event.target.closest('a[href]');
+
+      if (!link || !content.contains(link)) return;
+
+      const id = getPageId(link.getAttribute('href'));
+
+      if (id) {
+        event.preventDefault();
+        loadPage(id);
       }
     });
 
-    // 等 Prism 的 defer 腳本載入後再啟動入口
-    document.addEventListener('DOMContentLoaded', function() {
-      loadContent();
-    });
+    // 進站一律先驗證：
+    // 網址有 p → 載入該頁；沒有 p → 有頁面紀錄就嘗試恢復，否則走入口驗證
+    const rememberedPage =
+      sessionStorage.getItem(PAGE_KEY) || '';
+
+    loadPage(requestedId || rememberedPage);
   </script>
 </body>
 </html>

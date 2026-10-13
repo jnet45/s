@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>課程入口</title>
+
+  <style>
+    /* 入口樣式限定在 #entry 內 */
+    #entry {
+      box-sizing: border-box;
+      max-width: 420px;
+      margin: 48px auto;
+      padding: 24px;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background: #fff;
+      color: #222;
+    }
+
+    #entry[hidden],
+    #entry [hidden] {
+      display: none !important;
+    }
+
+    #entry h1 {
+      margin: 0 0 20px;
+      font-size: 24px;
+    }
+
+    #entry input,
+    #entry button {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 12px;
+      margin-top: 12px;
+      font-size: 16px;
+    }
+
+    #entry #msg {
+      min-height: 24px;
+      margin-top: 16px;
+      color: #b00020;
+    }
+
+    #entry button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+  </style>
+
+  <!-- Prism：核心、Python、Line Numbers -->
+  <link rel="stylesheet" href="prism/prism.css">
+  <link rel="stylesheet" href="prism/prism-line-numbers.css">
+
+  <script src="prism/prism.js" defer></script>
+  <script src="prism/prism-python.js" defer></script>
+  <script src="prism/prism-line-numbers.js" defer></script>
+</head>
+
+<body>
+  <section id="entry">
+    <h1>課程入口</h1>
+
+    <div id="gate" hidden>
+      <form id="password-form">
+        <label for="pw">請輸入入口密碼</label>
+
+        <input
+          id="pw"
+          type="password"
+          placeholder="密碼"
+          autocomplete="off"
+          required
+        >
+
+        <button id="btn" type="submit">確認</button>
+      </form>
+    </div>
+
+    <p id="msg" role="status" aria-live="polite">載入中…</p>
+  </section>
+
+  <main id="content"></main>
+
+  <script>
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbwNbE57ZiHnv6IOqThCVMa6cwUNnykPFvfZhJSBqJLbug5RLds_JXPxllgYg74k_CY/exec';
+
+    const entry = document.getElementById('entry');
+    const gate = document.getElementById('gate');
+    const form = document.getElementById('password-form');
+    const pw = document.getElementById('pw');
+    const btn = document.getElementById('btn');
+    const msg = document.getElementById('msg');
+    const content = document.getElementById('content');
+
+    let loading = false;
+
+    // 注入前修正圖片路徑：
+    // images/a.png   → p01/images/a.png
+    // ./images/a.png → p01/images/a.png
+    function prepareHtml(html, dir) {
+      if (typeof dir !== 'string' || dir === '') {
+        return html;
+      }
+
+      const folder = dir.replace(/\/+$/, '');
+      const template = document.createElement('template');
+
+      template.innerHTML = html;
+
+      template.content.querySelectorAll('img[src]').forEach(img => {
+        const src = img.getAttribute('src');
+
+        if (/^(?:\.\/)?images\//.test(src)) {
+          img.setAttribute(
+            'src',
+            folder + '/' + src.replace(/^\.\//, '')
+          );
+        }
+      });
+
+      return template.innerHTML;
+    }
+
+    // 注入後套用 Prism
+    function highlightContent() {
+      if (window.Prism) {
+        Prism.highlightAllUnder(content);
+      }
+    }
+
+    async function loadContent(password) {
+      if (loading) return;
+
+      loading = true;
+      btn.disabled = true;
+      msg.textContent = '載入中…';
+
+      try {
+        const url = new URL(GAS_URL);
+
+        if (password !== undefined) {
+          url.searchParams.set('pw', password);
+        }
+
+        url.searchParams.set('_', Date.now().toString());
+
+        const response = await fetch(url.toString(), {
+          method: 'GET',
+          redirect: 'follow',
+          credentials: 'omit'
+        });
+
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status);
+        }
+
+        const data = await response.json();
+
+        if (data.status === 'need_password') {
+          gate.hidden = false;
+          msg.textContent = '目前非開放時間，請輸入密碼。';
+          pw.focus();
+          return;
+        }
+
+        if (data.status === 'ok' || data.status === 'fail') {
+          if (typeof data.html !== 'string') {
+            throw new Error('後端未回傳 HTML 內容');
+          }
+
+          if (typeof data.dir !== 'string') {
+            throw new Error('後端未回傳 dir，請確認 GAS 部署版本');
+          }
+
+          // 先修正圖片路徑，再注入目前頁面
+          content.innerHTML = prepareHtml(data.html, data.dir);
+
+          entry.hidden = true;
+          pw.value = '';
+
+          highlightContent();
+          return;
+        }
+
+        throw new Error(data.message || '後端回傳格式不正確');
+      } catch (error) {
+        console.error(error);
+
+        gate.hidden = false;
+        msg.textContent =
+          '載入失敗：' + (error.message || '請稍後再試');
+      } finally {
+        loading = false;
+        btn.disabled = false;
+      }
+    }
+
+    // 學生輸入原樣送到 GAS，不在前端驗證
+    form.addEventListener('submit', function(event) {
+      event.preventDefault();
+      loadContent(pw.value);
+    });
+
+    // 事件委派：
+    // 之後由 innerHTML 注入的按鈕也能偵測
+    document.addEventListener('click', function(event) {
+      if (!(event.target instanceof Element)) return;
+
+      const button = event.target.closest('.fold-btn, .lock-btn');
+
+      if (!button || !content.contains(button)) return;
+
+      event.preventDefault();
+
+      if (button.matches('.fold-btn')) {
+        // 後續加入：
+        // 首次點擊等待 30 秒，再次點擊才展開。
+        // 載入成功後保留內容，不重新請求 GAS。
+        return;
+      }
+
+      if (button.matches('.lock-btn')) {
+        // 後續加入：
+        // GAS 驗證通過後，才回傳 Python。
+        return;
+      }
+    });
+
+    // 等 Prism 的 defer 腳本載入後再啟動入口
+    document.addEventListener('DOMContentLoaded', function() {
+      loadContent();
+    });
+  </script>
+</body>
+</html>

@@ -71,7 +71,7 @@
       DOMParser 拆解後，用 innerHTML 放進 #content
       GitHub 上的 p10.html 不會被讀取；GitHub 只提供圖片
     */
-    const GAS_URL = 'https://script.google.com/macros/s/AKfycbxhP9h22Hqurrfv5J7_KyqahTVAfkb-JNukNk43N6APIlI_tLH_ABLIvq5AjaTB8sY/exec';
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbzMBuTJN1MhrceVlxJdE8YHQr8f6h17knTJy6kTBRcQch-i2zHgljaINhU5qUNyYLE/exec';
 
     // 只保存已被 GAS 接受的學生輸入值與目前頁面
     const PASS_KEY = 'pass_pw';
@@ -376,10 +376,26 @@
 
       const id = getPageId(link.getAttribute('href'));
 
-      if (id) {
-        event.preventDefault();
-        loadPage(id);
+      if (!id) return;
+
+      // Ctrl / Cmd / Shift / Alt + 點擊：交給瀏覽器原生處理
+      if (
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
       }
+
+      event.preventDefault();
+
+      // 另開新分頁：/s/?p=p10
+      // 刻意不加 noopener，讓新分頁有機會取得目前的通過狀態
+      const target = new URL('./', location.href);
+      target.searchParams.set('p', id);
+
+      window.open(target.href, '_blank');
     });
 
     // 進站一律先驗證：

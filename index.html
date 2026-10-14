@@ -37,6 +37,7 @@
 
     #entry #msg {
       color: #b00020;
+      font-variant-numeric: tabular-nums;
     }
 
     #entry button:disabled {
@@ -170,7 +171,7 @@
       id="msg"
       role="status"
       aria-live="polite"
-    >驗證中…</p>
+    >驗證中… 00:00</p>
   </section>
 
   <main id="content"></main>
@@ -247,12 +248,47 @@
     let loading = false;
     let targetId = initialId;
     let activeGameId = '';
+
     let deadline = 0;
     let timerId = 0;
+    let verifyingTimerId = 0;
 
     function forgetPassword() {
       passwordValue = '';
       sessionStorage.removeItem(PASS_KEY);
+    }
+
+    function stopVerifyingTimer() {
+      clearInterval(verifyingTimerId);
+      verifyingTimerId = 0;
+    }
+
+    // 驗證等待時間：計算已經過多久。
+    function startVerifyingTimer() {
+      stopVerifyingTimer();
+
+      const startedAt = Date.now();
+
+      function update() {
+        const total = Math.floor(
+          (Date.now() - startedAt) / 1000
+        );
+
+        const minutes = String(
+          Math.floor(total / 60)
+        ).padStart(2, '0');
+
+        const seconds = String(
+          total % 60
+        ).padStart(2, '0');
+
+        msg.textContent =
+          '驗證中… ' + minutes + ':' + seconds;
+      }
+
+      update();
+
+      verifyingTimerId = setInterval(update, 250);
     }
 
     function stopGame() {
@@ -278,6 +314,8 @@
     }
 
     function askPassword(message) {
+      stopVerifyingTimer();
+
       entry.hidden = false;
       form.hidden = false;
 
@@ -318,6 +356,7 @@
       );
     }
 
+    // 還原連結，並設定另開新分頁。
     function restoreLinks(doc) {
       doc.querySelectorAll('a[href]').forEach(link => {
         try {
@@ -333,7 +372,9 @@
             return;
           }
 
-          const id = isEntryUrl(url)
+          const isEntry = isEntryUrl(url);
+
+          const id = isEntry
             ? url.searchParams.get('p')
             : null;
 
@@ -343,22 +384,23 @@
               ? './?p=' + encodeURIComponent(id)
               : url.href
           );
+
+          link.setAttribute('target', '_blank');
+
+          if (isEntry) {
+            // 入口連結保留 opener 設定，
+            // 延續新分頁沿用密碼再交 GAS 驗證的設計。
+            link.setAttribute('rel', 'opener');
+          } else {
+            link.setAttribute(
+              'rel',
+              'noopener noreferrer'
+            );
+          }
         } catch {
           link.removeAttribute('href');
         }
       });
-    }
-
-    function getPageId(href) {
-      try {
-        const url = unwrapUrl(href);
-
-        return isEntryUrl(url)
-          ? url.searchParams.get('p')
-          : null;
-      } catch {
-        return null;
-      }
     }
 
     // 一般教材：注入 style 與 body 內容。
@@ -477,13 +519,14 @@
       document.title = title || '遊戲';
 
       // 每次驗證通過，都開始新的 60 秒。
-      // 到期時間只存在本頁變數，不寫入儲存空間。
+      // 到期時間不寫入儲存空間。
       deadline = Date.now() + PLAY_MS;
 
       // 直接使用 GAS 從 PAGES 回傳的網址。
       gameFrame.src = url;
 
       updateGameTime();
+
       timerId = setInterval(updateGameTime, 250);
     }
 
@@ -505,7 +548,8 @@
       entry.hidden = false;
       form.hidden = true;
       btn.disabled = true;
-      msg.textContent = '驗證中…';
+
+      startVerifyingTimer();
 
       try {
         const url = new URL(GAS_URL);
@@ -534,6 +578,8 @@
 
         const data = await response.json();
 
+        stopVerifyingTimer();
+
         if (data.status === 'need_password') {
           forgetPassword();
           askPassword('請輸入密碼。');
@@ -554,7 +600,7 @@
           data.view === 'game';
 
         if (isGame) {
-          // 載入遊戲前清除密碼，F5 必須重新輸入。
+          // 清除本分頁密碼，F5 必須重新輸入。
           forgetPassword();
 
           showGame(
@@ -567,7 +613,9 @@
             typeof data.html !== 'string' ||
             typeof data.dir !== 'string'
           ) {
-            throw new Error('後端沒有回傳完整教材資料');
+            throw new Error(
+              '後端沒有回傳完整教材資料'
+            );
           }
 
           showHtml(
@@ -596,9 +644,15 @@
       } catch (error) {
         console.error(error);
 
+        stopVerifyingTimer();
         clearContent();
-        askPassword('載入失敗：' + error.message);
+
+        askPassword(
+          '載入失敗：' + error.message
+        );
       } finally {
+        stopVerifyingTimer();
+
         loading = false;
         btn.disabled = false;
       }
@@ -642,30 +696,8 @@
         return;
       }
 
-      const link = event.target.closest('a[href]');
-
-      if (!link || !content.contains(link)) return;
-
-      const id = getPageId(
-        link.getAttribute('href')
-      );
-
-      if (!id) return;
-
-      if (
-        event.ctrlKey ||
-        event.metaKey ||
-        event.shiftKey ||
-        event.altKey
-      ) {
-        return;
-      }
-
-      event.preventDefault();
-
-      if (!loading) {
-        loadPage(id);
-      }
+      // 不攔截超連結。
+      // 由 target="_blank" 另開新分頁。
     });
 
     document.addEventListener(
@@ -677,8 +709,15 @@
       }
     );
 
-    window.addEventListener('focus', updateGameTime);
-    window.addEventListener('pageshow', updateGameTime);
+    window.addEventListener(
+      'focus',
+      updateGameTime
+    );
+
+    window.addEventListener(
+      'pageshow',
+      updateGameTime
+    );
 
     loadPage(initialId);
   </script>

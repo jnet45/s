@@ -2,12 +2,16 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
 
   <title>課程入口</title>
 
   <style>
-    /* 入口樣式限定在 #entry 內 */
+    /* 入口樣式：全部限定在 #entry 內 */
     #entry {
       box-sizing: border-box;
       max-width: 360px;
@@ -39,6 +43,109 @@
       opacity: 0.6;
       cursor: wait;
     }
+
+    /* 遊戲樣式：限定在 #game 內 */
+    #game {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      margin: 0;
+      background: #000;
+      font-family:
+        system-ui, "Microsoft JhengHei", sans-serif;
+    }
+
+    #game[hidden],
+    #game [hidden] {
+      display: none !important;
+    }
+
+    #game * {
+      box-sizing: border-box;
+    }
+
+    #game #gameFrame {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #000;
+    }
+
+    #game #gameTimer {
+      position: absolute;
+      top: 0;
+      right: 0;
+      z-index: 2;
+
+      width: min(380px, 100%);
+      height: 64px;
+      padding: 0 20px;
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      border-radius: 0 0 0 14px;
+      background: #111827;
+      color: #fff;
+
+      font-size: 26px;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      user-select: none;
+
+      box-shadow: -4px 4px 14px #0007;
+    }
+
+    #game #gameTimer.warning {
+      background: #dc2626;
+    }
+
+    #game #gameMask {
+      position: absolute;
+      inset: 0;
+      z-index: 3;
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      padding: 20px;
+      background: rgba(17, 24, 39, 0.96);
+    }
+
+    #game #gameBox {
+      width: 100%;
+      max-width: 340px;
+      padding: 28px;
+      border-radius: 16px;
+      background: #fff;
+      color: #111827;
+      text-align: center;
+    }
+
+    #game #gameBox h2 {
+      margin: 0 0 14px;
+      font-size: 24px;
+    }
+
+    #game #gameBox p {
+      line-height: 1.6;
+    }
+
+    #game #gameBox button {
+      width: 100%;
+      margin-top: 12px;
+      padding: 12px;
+      border: 0;
+      border-radius: 8px;
+      background: #2563eb;
+      color: #fff;
+      font-size: 18px;
+      cursor: pointer;
+    }
   </style>
 </head>
 
@@ -54,28 +161,61 @@
         required
       >
 
-      <button id="btn" type="submit">確認</button>
+      <button id="btn" type="submit">
+        確認
+      </button>
     </form>
 
-    <p id="msg" role="status" aria-live="polite">驗證中…</p>
+    <p
+      id="msg"
+      role="status"
+      aria-live="polite"
+    >驗證中…</p>
   </section>
 
   <main id="content"></main>
 
-  <script>
-    /*
-      資料流向：
-      index.html ──fetch──> GAS（/exec?p=p10）
-                              └─ DriveApp 讀出 Drive 的 p10/p10.html 文字
-      index.html <──JSON──  { html: "..." }
-      DOMParser 拆解後，用 innerHTML 放進 #content
-      GitHub 上的 p10.html 不會被讀取；GitHub 只提供圖片
-    */
-    const GAS_URL = 'https://script.google.com/macros/s/AKfycbwRN9YkGtu_nCKqQLyoXgYovgbm0yzI3dOTR2Mf1AtcejVTopb2r8g_M47jZCWg5ik/exec';
+  <!-- 所有遊戲共用這個版面 -->
+  <section id="game" hidden>
+    <iframe
+      id="gameFrame"
+      title="遊戲"
+      src="about:blank"
+      allow="autoplay; gamepad"
+    ></iframe>
 
-    // 只保存已被 GAS 接受的學生輸入值與目前頁面
+    <div id="gameTimer">準備中…</div>
+
+    <section
+      id="gameMask"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="gameLockTitle"
+      hidden
+    >
+      <div id="gameBox">
+        <h2 id="gameLockTitle">時間到</h2>
+
+        <p>
+          請重新輸入密碼，開始新的 1 分鐘。
+        </p>
+
+        <button id="retryGame" type="button">
+          重新輸入密碼
+        </button>
+      </div>
+    </section>
+  </section>
+
+  <script>
+    const GAS_URL =
+      'https://script.google.com/macros/s/AKfycbxVtMMMLfBhwNEUpW0KDneo8DJQPHAZlU8x_ENSek_P1Z24JQR393f1SmLBziGjVLM/exec';
+
     const PASS_KEY = 'pass_pw';
     const PAGE_KEY = 'pass_page';
+
+    const PLAY_MS = 60 * 1000;
+    const WARNING_MS = 10 * 1000;
 
     const entry = document.getElementById('entry');
     const form = document.getElementById('password-form');
@@ -84,89 +224,154 @@
     const msg = document.getElementById('msg');
     const content = document.getElementById('content');
 
-    // 先讀取 p，再清除參數，網址統一停在 /s/
+    const game = document.getElementById('game');
+    const gameFrame = document.getElementById('gameFrame');
+    const gameTimer = document.getElementById('gameTimer');
+    const gameMask = document.getElementById('gameMask');
+    const retryGame = document.getElementById('retryGame');
+
     const requestedId =
       new URLSearchParams(location.search).get('p') || '';
 
+    const initialId =
+      requestedId ||
+      sessionStorage.getItem(PAGE_KEY) ||
+      '';
+
+    // 先取得 p，再清掉網址參數。
     history.replaceState(null, '', '/s/');
 
-    let passwordValue = sessionStorage.getItem(PASS_KEY) || '';
-    let loading = false;
+    let passwordValue =
+      sessionStorage.getItem(PASS_KEY) || '';
 
-    // 清除密碼與目前頁面
-    function forgetAll() {
+    let loading = false;
+    let targetId = initialId;
+    let activeGameId = '';
+    let deadline = 0;
+    let timerId = 0;
+
+    function forgetPassword() {
       passwordValue = '';
       sessionStorage.removeItem(PASS_KEY);
-      sessionStorage.removeItem(PAGE_KEY);
     }
 
-    // 清除注入內容及排版
+    function stopGame() {
+      clearInterval(timerId);
+      timerId = 0;
+      deadline = 0;
+
+      gameFrame.src = 'about:blank';
+      game.hidden = true;
+      gameMask.hidden = true;
+
+      activeGameId = '';
+    }
+
     function clearContent() {
+      stopGame();
+
       content.replaceChildren();
       content.className = '';
       content.removeAttribute('style');
+
       document.title = '課程入口';
     }
 
-    // 還原 Google Docs 匯出的轉址連結
-    // google.com/url?q=https://jnet45.github.io/s/?p%3Dp10&sa=D&...
-    // → ./?p=p10
+    function askPassword(message) {
+      entry.hidden = false;
+      form.hidden = false;
+
+      msg.textContent = message || '請輸入密碼。';
+
+      pw.value = '';
+      pw.focus();
+    }
+
+    // 拆解一般網址或 Google Docs 轉址。
+    function unwrapUrl(href) {
+      let url = new URL(href, location.href);
+
+      if (
+        url.hostname === 'www.google.com' &&
+        url.pathname === '/url'
+      ) {
+        const target =
+          url.searchParams.get('q') ||
+          url.searchParams.get('url');
+
+        if (target) {
+          url = new URL(target, location.href);
+        }
+      }
+
+      return url;
+    }
+
+    function isEntryUrl(url) {
+      return (
+        url.origin === location.origin &&
+        [
+          '/s/',
+          '/s/index.html',
+          '/s/index.htm'
+        ].includes(url.pathname)
+      );
+    }
+
     function restoreLinks(doc) {
       doc.querySelectorAll('a[href]').forEach(link => {
         try {
-          const url = new URL(
-            link.getAttribute('href'),
-            location.href
+          const url = unwrapUrl(
+            link.getAttribute('href')
           );
 
           if (
-            url.hostname !== 'www.google.com' ||
-            url.pathname !== '/url'
+            !['http:', 'https:', 'mailto:', 'tel:']
+              .includes(url.protocol)
           ) {
+            link.removeAttribute('href');
             return;
           }
 
-          // searchParams 會自動把 %3D 還原成 =
-          const target =
-            url.searchParams.get('q') ||
-            url.searchParams.get('url');
-
-          if (!target) return;
-
-          const targetUrl = new URL(target, location.href);
-
-          const isEntry =
-            targetUrl.origin === location.origin &&
-            ['/s/', '/s/index.html', '/s/index.htm']
-              .includes(targetUrl.pathname) &&
-            targetUrl.searchParams.has('p');
+          const id = isEntryUrl(url)
+            ? url.searchParams.get('p')
+            : null;
 
           link.setAttribute(
             'href',
-            isEntry
-              ? './?p=' +
-                encodeURIComponent(targetUrl.searchParams.get('p'))
-              : target
+            id
+              ? './?p=' + encodeURIComponent(id)
+              : url.href
           );
         } catch {
-          // 網址格式異常就保持原樣
+          link.removeAttribute('href');
         }
       });
     }
 
-    // 解析完整 HTML，只注入樣式與 body 內容
+    function getPageId(href) {
+      try {
+        const url = unwrapUrl(href);
+
+        return isEntryUrl(url)
+          ? url.searchParams.get('p')
+          : null;
+      } catch {
+        return null;
+      }
+    }
+
+    // 一般教材：注入 style 與 body 內容。
     function showHtml(html, title, dir) {
       const doc = new DOMParser().parseFromString(
         html,
         'text/html'
       );
 
-      // 功能 JS 統一放 index.html，不帶入 script 或 base
-      doc.querySelectorAll('script, base').forEach(
-        element => element.remove()
-      );
+      doc.querySelectorAll(
+        'script, base, meta[http-equiv="refresh" i]'
+      ).forEach(element => element.remove());
 
-      // 移除 onclick 等行內事件
       doc.querySelectorAll('*').forEach(element => {
         for (const attribute of [...element.attributes]) {
           if (/^on/i.test(attribute.name)) {
@@ -175,10 +380,8 @@
         }
       });
 
-      // 還原 Google 轉址連結
       restoreLinks(doc);
 
-      // images/a.png → p10/images/a.png
       if (dir) {
         doc.querySelectorAll('img[src]').forEach(img => {
           const src = img.getAttribute('src');
@@ -186,27 +389,32 @@
           if (/^(?:\.\/)?images\//.test(src)) {
             img.setAttribute(
               'src',
-              dir + '/' + src.replace(/^\.\//, '')
+              '/s/' +
+                dir +
+                '/' +
+                src.replace(/^\.\//, '')
             );
           }
         });
       }
 
-      // 樣式中的 body 規則改成只作用在 #content
-      const styles = [...doc.head.querySelectorAll('style')]
-        .map(style => {
-          const css = style.textContent.replace(
-            /(^|[}\s,>+~])body(?![\w-])(?=[^{}]*\{)/g,
-            '$1#content'
-          );
+      const styles = [
+        ...doc.head.querySelectorAll('style')
+      ].map(style => {
+        const css = style.textContent.replace(
+          /(^|[{}\s,>+~])body(?![\w-])(?=[^{}]*\{)/g,
+          '$1#content'
+        );
 
-          return '<style>' + css + '</style>';
-        })
-        .join('');
+        const node = document.createElement('style');
+        node.textContent = css;
 
-      content.innerHTML = styles + doc.body.innerHTML;
+        return node;
+      });
 
-      // 原 body 的 class 與排版搬到 #content
+      content.innerHTML = doc.body.innerHTML;
+      content.prepend(...styles);
+
       content.className = doc.body.className;
       content.style.cssText = doc.body.style.cssText;
 
@@ -214,46 +422,86 @@
       window.scrollTo(0, 0);
     }
 
-    // 辨識 ./?p=p10 或 Google Docs 匯出的轉址連結
-    function getPageId(href) {
-      try {
-        let url = new URL(href, location.href);
+    function lockGame() {
+      clearInterval(timerId);
+      timerId = 0;
+      deadline = 0;
 
-        if (
-          url.hostname === 'www.google.com' &&
-          url.pathname === '/url'
-        ) {
-          const target =
-            url.searchParams.get('q') ||
-            url.searchParams.get('url');
-
-          if (target) {
-            url = new URL(target, location.href);
-          }
-        }
-
-        const isEntry =
-          url.origin === location.origin &&
-          (
-            url.pathname === '/s/' ||
-            url.pathname === '/s/index.html' ||
-            url.pathname === '/s/index.htm'
-          );
-
-        return isEntry ? url.searchParams.get('p') : null;
-      } catch {
-        return null;
+      if (
+        document.fullscreenElement &&
+        document.exitFullscreen
+      ) {
+        document.exitFullscreen().catch(() => {});
       }
+
+      // 卸載遊戲，顯示時間到遮罩。
+      gameFrame.src = 'about:blank';
+
+      gameTimer.textContent = '時間到';
+      gameTimer.classList.remove('warning');
+
+      gameMask.hidden = false;
+      retryGame.focus();
     }
 
-    // 每次載入都由 GAS 重新驗證
-    // id 為空：通過後注入 p01.html
-    async function loadPage(id) {
+    function updateGameTime() {
+      if (!deadline || game.hidden) return;
+
+      const remaining = deadline - Date.now();
+
+      if (remaining <= 0) {
+        lockGame();
+        return;
+      }
+
+      const total = Math.ceil(remaining / 1000);
+      const minutes = Math.floor(total / 60);
+      const seconds = String(total % 60).padStart(2, '0');
+
+      gameTimer.textContent =
+        '剩餘 ' + minutes + ':' + seconds;
+
+      gameTimer.classList.toggle(
+        'warning',
+        remaining <= WARNING_MS
+      );
+    }
+
+    function showGame(url, id, title) {
+      activeGameId = id;
+
+      game.hidden = false;
+      gameMask.hidden = true;
+
+      gameFrame.title = title || '遊戲';
+      document.title = title || '遊戲';
+
+      // 每次驗證通過，都開始新的 60 秒。
+      // 到期時間只存在本頁變數，不寫入儲存空間。
+      deadline = Date.now() + PLAY_MS;
+
+      // 直接使用 GAS 從 PAGES 回傳的網址。
+      gameFrame.src = url;
+
+      updateGameTime();
+      timerId = setInterval(updateGameTime, 250);
+    }
+
+    async function loadPage(id = '') {
       if (loading) return;
 
       loading = true;
+      targetId = id;
+
+      // 保留目標頁面，F5 後仍知道要進哪一頁。
+      if (id) {
+        sessionStorage.setItem(PAGE_KEY, id);
+      } else {
+        sessionStorage.removeItem(PAGE_KEY);
+      }
 
       clearContent();
+
       entry.hidden = false;
       form.hidden = true;
       btn.disabled = true;
@@ -266,14 +514,18 @@
           url.searchParams.set('p', id);
         }
 
-        url.searchParams.set('_', Date.now().toString());
-
         if (passwordValue) {
           url.searchParams.set('pw', passwordValue);
         }
 
+        url.searchParams.set(
+          '_',
+          Date.now().toString()
+        );
+
         const response = await fetch(url, {
-          credentials: 'omit'
+          credentials: 'omit',
+          cache: 'no-store'
         });
 
         if (!response.ok) {
@@ -283,47 +535,60 @@
         const data = await response.json();
 
         if (data.status === 'need_password') {
-          forgetAll();
-
-          form.hidden = false;
-          msg.textContent = id
-            ? '尚未通過密碼，請先輸入密碼。'
-            : '請輸入密碼。';
-
-          pw.focus();
+          forgetPassword();
+          askPassword('請輸入密碼。');
           return;
         }
 
-        if (data.status !== 'ok' && data.status !== 'fail') {
-          throw new Error(data.message || '頁面讀取失敗');
+        if (
+          data.status !== 'ok' &&
+          data.status !== 'fail'
+        ) {
+          throw new Error(
+            data.message || '頁面讀取失敗'
+          );
         }
 
-        if (typeof data.html !== 'string') {
-          throw new Error('後端沒有回傳 HTML');
-        }
+        const isGame =
+          data.status === 'ok' &&
+          data.view === 'game';
 
-        if (typeof data.dir !== 'string') {
-          throw new Error('後端沒有回傳 dir，請確認 GAS 部署版本');
-        }
+        if (isGame) {
+          // 載入遊戲前清除密碼，F5 必須重新輸入。
+          forgetPassword();
 
-        showHtml(data.html, data.title, data.dir);
+          showGame(
+            data.url,
+            id,
+            data.title
+          );
+        } else {
+          if (
+            typeof data.html !== 'string' ||
+            typeof data.dir !== 'string'
+          ) {
+            throw new Error('後端沒有回傳完整教材資料');
+          }
+
+          showHtml(
+            data.html,
+            data.title,
+            data.dir
+          );
+        }
 
         if (data.status === 'fail') {
-          // 密碼錯誤：注入 p09，清除紀錄
-          forgetAll();
-        } else {
-          // 通過後才記錄學生輸入值
-          if (passwordValue) {
-            sessionStorage.setItem(PASS_KEY, passwordValue);
-          }
+          forgetPassword();
+          sessionStorage.removeItem(PAGE_KEY);
 
-          // 有教材代號就記住，F5 嘗試回到同一頁
-          // 沒有代號表示 p01，不需額外記錄
-          if (id) {
-            sessionStorage.setItem(PAGE_KEY, id);
-          } else {
-            sessionStorage.removeItem(PAGE_KEY);
-          }
+          // p09 顯示後，下一次入口驗證回首頁。
+          targetId = '';
+        } else if (!isGame && passwordValue) {
+          // 一般教材維持保存密碼的流程。
+          sessionStorage.setItem(
+            PASS_KEY,
+            passwordValue
+          );
         }
 
         entry.hidden = true;
@@ -331,54 +596,62 @@
       } catch (error) {
         console.error(error);
 
-        sessionStorage.removeItem(PAGE_KEY);
-
-        form.hidden = false;
-        msg.textContent = error.message;
+        clearContent();
+        askPassword('載入失敗：' + error.message);
       } finally {
         loading = false;
         btn.disabled = false;
       }
     }
 
-    // 密碼框送出：通過後一律先顯示 p01
-    form.addEventListener('submit', function(event) {
+    form.addEventListener('submit', event => {
       event.preventDefault();
 
+      if (loading) return;
+
       passwordValue = pw.value;
-      loadPage('');
+      loadPage(targetId);
     });
 
-    // document 事件委派：動態注入的按鈕與連結也有效
-    document.addEventListener('click', function(event) {
+    retryGame.addEventListener('click', () => {
+      const id = activeGameId;
+
+      if (!id) return;
+
+      forgetPassword();
+      clearContent();
+
+      targetId = id;
+
+      askPassword(
+        '請重新輸入密碼，開始新的 1 分鐘。'
+      );
+    });
+
+    document.addEventListener('click', event => {
       if (!(event.target instanceof Element)) return;
 
-      // 按鈕優先處理，避免被當成一般教材連結
-      const button = event.target.closest('.fold-btn, .lock-btn');
+      const button = event.target.closest(
+        '.fold-btn, .lock-btn'
+      );
 
       if (button && content.contains(button)) {
         event.preventDefault();
 
-        if (button.matches('.fold-btn')) {
-          // 後續加入：首次按下等 30 秒，再按才展開
-          return;
-        }
-
-        if (button.matches('.lock-btn')) {
-          // 後續加入：驗證後才回傳 Python
-          return;
-        }
+        // 預留功能：目前不執行展摺或 Python 解鎖。
+        return;
       }
 
       const link = event.target.closest('a[href]');
 
       if (!link || !content.contains(link)) return;
 
-      const id = getPageId(link.getAttribute('href'));
+      const id = getPageId(
+        link.getAttribute('href')
+      );
 
       if (!id) return;
 
-      // Ctrl / Cmd / Shift / Alt + 點擊：交給瀏覽器原生處理
       if (
         event.ctrlKey ||
         event.metaKey ||
@@ -390,20 +663,24 @@
 
       event.preventDefault();
 
-      // 另開新分頁：/s/?p=p10
-      // 刻意不加 noopener，讓新分頁有機會取得目前的通過狀態
-      const target = new URL('./', location.href);
-      target.searchParams.set('p', id);
-
-      window.open(target.href, '_blank');
+      if (!loading) {
+        loadPage(id);
+      }
     });
 
-    // 進站一律先驗證：
-    // 網址有 p → 載入該頁；沒有 p → 有頁面紀錄就嘗試恢復，否則走入口驗證
-    const rememberedPage =
-      sessionStorage.getItem(PAGE_KEY) || '';
+    document.addEventListener(
+      'visibilitychange',
+      () => {
+        if (!document.hidden) {
+          updateGameTime();
+        }
+      }
+    );
 
-    loadPage(requestedId || rememberedPage);
+    window.addEventListener('focus', updateGameTime);
+    window.addEventListener('pageshow', updateGameTime);
+
+    loadPage(initialId);
   </script>
 </body>
 </html>

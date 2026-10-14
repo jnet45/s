@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>課程入口</title>
+
+  <style>
+    /* 入口樣式限定在 #entry 內 */
+    #entry {
+      box-sizing: border-box;
+      max-width: 360px;
+      margin: 24px auto;
+      padding: 16px;
+      font-family: sans-serif;
+      text-align: center;
+    }
+
+    #entry[hidden],
+    #entry [hidden] {
+      display: none !important;
+    }
+
+    #entry input,
+    #entry button {
+      box-sizing: border-box;
+      width: 100%;
+      margin-top: 12px;
+      padding: 10px;
+      font-size: 16px;
+    }
+
+    #entry #msg {
+      color: #b00020;
+    }
+
+    #entry button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+  </style>
+</head>
+
+<body>
+  <section id="entry">
+    <form id="password-form" hidden>
+      <label for="pw">請輸入入口密碼</label>
+
+      <input
+        id="pw"
+        type="password"
+        autocomplete="off"
+        required
+      >
+
+      <button id="btn" type="submit">確認</button>
+    </form>
+
+    <p id="msg" role="status" aria-live="polite">驗證中…</p>
+  </section>
+
+  <main id="content"></main>
+
+  <script>
+    /*
+      資料流向：
+      index.html ──fetch──> GAS（/exec?p=p10）
+                              └─ DriveApp 讀出 Drive 的 p10/p10.html 文字
+      index.html <──JSON──  { html: "..." }
+      DOMParser 拆解後，用 innerHTML 放進 #content
+      GitHub 上的 p10.html 不會被讀取；GitHub 只提供圖片
+    */
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbwRN9YkGtu_nCKqQLyoXgYovgbm0yzI3dOTR2Mf1AtcejVTopb2r8g_M47jZCWg5ik/exec';
+
+    // 只保存已被 GAS 接受的學生輸入值與目前頁面
+    const PASS_KEY = 'pass_pw';
+    const PAGE_KEY = 'pass_page';
+
+    const entry = document.getElementById('entry');
+    const form = document.getElementById('password-form');
+    const pw = document.getElementById('pw');
+    const btn = document.getElementById('btn');
+    const msg = document.getElementById('msg');
+    const content = document.getElementById('content');
+
+    // 先讀取 p，再清除參數，網址統一停在 /s/
+    const requestedId =
+      new URLSearchParams(location.search).get('p') || '';
+
+    history.replaceState(null, '', '/s/');
+
+    let passwordValue = sessionStorage.getItem(PASS_KEY) || '';
+    let loading = false;
+
+    // 清除密碼與目前頁面
+    function forgetAll() {
+      passwordValue = '';
+      sessionStorage.removeItem(PASS_KEY);
+      sessionStorage.removeItem(PAGE_KEY);
+    }
+
+    // 清除注入內容及排版
+    function clearContent() {
+      content.replaceChildren();
+      content.className = '';
+      content.removeAttribute('style');
+      document.title = '課程入口';
+    }
+
+    // 還原 Google Docs 匯出的轉址連結
+    // google.com/url?q=https://jnet45.github.io/s/?p%3Dp10&sa=D&...
+    // → ./?p=p10
+    function restoreLinks(doc) {
+      doc.querySelectorAll('a[href]').forEach(link => {
+        try {
+          const url = new URL(
+            link.getAttribute('href'),
+            location.href
+          );
+
+          if (
+            url.hostname !== 'www.google.com' ||
+            url.pathname !== '/url'
+          ) {
+            return;
+          }
+
+          // searchParams 會自動把 %3D 還原成 =
+          const target =
+            url.searchParams.get('q') ||
+            url.searchParams.get('url');
+
+          if (!target) return;
+
+          const targetUrl = new URL(target, location.href);
+
+          const isEntry =
+            targetUrl.origin === location.origin &&
+            ['/s/', '/s/index.html', '/s/index.htm']
+              .includes(targetUrl.pathname) &&
+            targetUrl.searchParams.has('p');
+
+          link.setAttribute(
+            'href',
+            isEntry
+              ? './?p=' +
+                encodeURIComponent(targetUrl.searchParams.get('p'))
+              : target
+          );
+        } catch {
+          // 網址格式異常就保持原樣
+        }
+      });
+    }
+
+    // 解析完整 HTML，只注入樣式與 body 內容
+    function showHtml(html, title, dir) {
+      const doc = new DOMParser().parseFromString(
+        html,
+        'text/html'
+      );
+
+      // 功能 JS 統一放 index.html，不帶入 script 或 base
+      doc.querySelectorAll('script, base').forEach(
+        element => element.remove()
+      );
+
+      // 移除 onclick 等行內事件
+      doc.querySelectorAll('*').forEach(element => {
+        for (const attribute of [...element.attributes]) {
+          if (/^on/i.test(attribute.name)) {
+            element.removeAttribute(attribute.name);
+          }
+        }
+      });
+
+      // 還原 Google 轉址連結
+      restoreLinks(doc);
+
+      // images/a.png → p10/images/a.png
+      if (dir) {
+        doc.querySelectorAll('img[src]').forEach(img => {
+          const src = img.getAttribute('src');
+
+          if (/^(?:\.\/)?images\//.test(src)) {
+            img.setAttribute(
+              'src',
+              dir + '/' + src.replace(/^\.\//, '')
+            );
+          }
+        });
+      }
+
+      // 樣式中的 body 規則改成只作用在 #content
+      const styles = [...doc.head.querySelectorAll('style')]
+        .map(style => {
+          const css = style.textContent.replace(
+            /(^|[}\s,>+~])body(?![\w-])(?=[^{}]*\{)/g,
+            '$1#content'
+          );
+
+          return '<style>' + css + '</style>';
+        })
+        .join('');
+
+      content.innerHTML = styles + doc.body.innerHTML;
+
+      // 原 body 的 class 與排版搬到 #content
+      content.className = doc.body.className;
+      content.style.cssText = doc.body.style.cssText;
+
+      document.title = title || '課程入口';
+      window.scrollTo(0, 0);
+    }
+
+    // 辨識 ./?p=p10 或 Google Docs 匯出的轉址連結
+    function getPageId(href) {
+      try {
+        let url = new URL(href, location.href);
+
+        if (
+          url.hostname === 'www.google.com' &&
+          url.pathname === '/url'
+        ) {
+          const target =
+            url.searchParams.get('q') ||
+            url.searchParams.get('url');
+
+          if (target) {
+            url = new URL(target, location.href);
+          }
+        }
+
+        const isEntry =
+          url.origin === location.origin &&
+          (
+            url.pathname === '/s/' ||
+            url.pathname === '/s/index.html' ||
+            url.pathname === '/s/index.htm'
+          );
+
+        return isEntry ? url.searchParams.get('p') : null;
+      } catch {
+        return null;
+      }
+    }
+
+    // 每次載入都由 GAS 重新驗證
+    // id 為空：通過後注入 p01.html
+    async function loadPage(id) {
+      if (loading) return;
+
+      loading = true;
+
+      clearContent();
+      entry.hidden = false;
+      form.hidden = true;
+      btn.disabled = true;
+      msg.textContent = '驗證中…';
+
+      try {
+        const url = new URL(GAS_URL);
+
+        if (id) {
+          url.searchParams.set('p', id);
+        }
+
+        url.searchParams.set('_', Date.now().toString());
+
+        if (passwordValue) {
+          url.searchParams.set('pw', passwordValue);
+        }
+
+        const response = await fetch(url, {
+          credentials: 'omit'
+        });
+
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status);
+        }
+
+        const data = await response.json();
+
+        if (data.status === 'need_password') {
+          forgetAll();
+
+          form.hidden = false;
+          msg.textContent = id
+            ? '尚未通過密碼，請先輸入密碼。'
+            : '請輸入密碼。';
+
+          pw.focus();
+          return;
+        }
+
+        if (data.status !== 'ok' && data.status !== 'fail') {
+          throw new Error(data.message || '頁面讀取失敗');
+        }
+
+        if (typeof data.html !== 'string') {
+          throw new Error('後端沒有回傳 HTML');
+        }
+
+        if (typeof data.dir !== 'string') {
+          throw new Error('後端沒有回傳 dir，請確認 GAS 部署版本');
+        }
+
+        showHtml(data.html, data.title, data.dir);
+
+        if (data.status === 'fail') {
+          // 密碼錯誤：注入 p09，清除紀錄
+          forgetAll();
+        } else {
+          // 通過後才記錄學生輸入值
+          if (passwordValue) {
+            sessionStorage.setItem(PASS_KEY, passwordValue);
+          }
+
+          // 有教材代號就記住，F5 嘗試回到同一頁
+          // 沒有代號表示 p01，不需額外記錄
+          if (id) {
+            sessionStorage.setItem(PAGE_KEY, id);
+          } else {
+            sessionStorage.removeItem(PAGE_KEY);
+          }
+        }
+
+        entry.hidden = true;
+        pw.value = '';
+      } catch (error) {
+        console.error(error);
+
+        sessionStorage.removeItem(PAGE_KEY);
+
+        form.hidden = false;
+        msg.textContent = error.message;
+      } finally {
+        loading = false;
+        btn.disabled = false;
+      }
+    }
+
+    // 密碼框送出：通過後一律先顯示 p01
+    form.addEventListener('submit', function(event) {
+      event.preventDefault();
+
+      passwordValue = pw.value;
+      loadPage('');
+    });
+
+    // document 事件委派：動態注入的按鈕與連結也有效
+    document.addEventListener('click', function(event) {
+      if (!(event.target instanceof Element)) return;
+
+      // 按鈕優先處理，避免被當成一般教材連結
+      const button = event.target.closest('.fold-btn, .lock-btn');
+
+      if (button && content.contains(button)) {
+        event.preventDefault();
+
+        if (button.matches('.fold-btn')) {
+          // 後續加入：首次按下等 30 秒，再按才展開
+          return;
+        }
+
+        if (button.matches('.lock-btn')) {
+          // 後續加入：驗證後才回傳 Python
+          return;
+        }
+      }
+
+      const link = event.target.closest('a[href]');
+
+      if (!link || !content.contains(link)) return;
+
+      const id = getPageId(link.getAttribute('href'));
+
+      if (!id) return;
+
+      // Ctrl / Cmd / Shift / Alt + 點擊：交給瀏覽器原生處理
+      if (
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+
+      // 另開新分頁：/s/?p=p10
+      // 刻意不加 noopener，讓新分頁有機會取得目前的通過狀態
+      const target = new URL('./', location.href);
+      target.searchParams.set('p', id);
+
+      window.open(target.href, '_blank');
+    });
+
+    // 進站一律先驗證：
+    // 網址有 p → 載入該頁；沒有 p → 有頁面紀錄就嘗試恢復，否則走入口驗證
+    const rememberedPage =
+      sessionStorage.getItem(PAGE_KEY) || '';
+
+    loadPage(requestedId || rememberedPage);
+  </script>
+</body>
+</html>

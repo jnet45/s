@@ -1,8 +1,22 @@
 <html><head><meta content="text/html; charset=UTF-8" http-equiv="content-type"><title>雲校_無法登入</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  /* 圖片自適應 */
-  img { max-width: 100%; height: auto; }
+  /* 一般圖片：只縮小、不放大，裁切圖除外 */
+  img:not([style*="margin-left: -"], [style*="margin-left:-"], [style*="margin-top: -"], [style*="margin-top:-"]) {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  /* 圖片外層 span 不產生方塊，裁切圖除外 */
+  td span[style*="inline-block"]:not(:has(img[style*="margin-left: -"], img[style*="margin-left:-"], img[style*="margin-top: -"], img[style*="margin-top:-"])) {
+    display: contents !important;
+  }
+
+  /* 儲存格內的一般圖片置中，裁切圖除外 */
+  td img:not([style*="margin-left: -"], [style*="margin-left:-"], [style*="margin-top: -"], [style*="margin-top:-"]) {
+    display: block;
+    margin: 0 auto !important;
+  }
 
   /* 儲存格寬度包含內距與框線 */
   td { box-sizing: border-box; }

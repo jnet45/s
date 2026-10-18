@@ -388,15 +388,16 @@
           link.setAttribute('target', '_blank');
 
           if (isEntry) {
-            // 入口連結保留 opener 設定，
-            // 延續新分頁沿用密碼再交 GAS 驗證的設計。
-            link.setAttribute('rel', 'opener');
-          } else {
+            // 遊戲（非 p 開頭）不沿用密碼，每次都重新驗證。
+            const isGameId = id !== null && !id.startsWith('p');
             link.setAttribute(
               'rel',
-              'noopener noreferrer'
+              isGameId ? 'noopener' : 'opener'
             );
+          } else {
+            link.setAttribute('rel', 'noopener noreferrer');
           }
+
         } catch {
           link.removeAttribute('href');
         }

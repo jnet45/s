@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
+
+  <title>課程入口</title>
+
+  <style>
+    /* 入口樣式：全部限定在 #entry 內 */
+    #entry {
+      box-sizing: border-box;
+      max-width: 360px;
+      margin: 24px auto;
+      padding: 16px;
+      font-family: sans-serif;
+      text-align: center;
+    }
+
+    #entry[hidden],
+    #entry [hidden] {
+      display: none !important;
+    }
+
+    #entry input,
+    #entry button {
+      box-sizing: border-box;
+      width: 100%;
+      margin-top: 12px;
+      padding: 10px;
+      font-size: 16px;
+    }
+
+    #entry #msg {
+      color: #b00020;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #entry button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+
+    /* 遊戲樣式：限定在 #game 內 */
+    #game {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      margin: 0;
+      background: #000;
+      font-family:
+        system-ui, "Microsoft JhengHei", sans-serif;
+    }
+
+    #game[hidden],
+    #game [hidden] {
+      display: none !important;
+    }
+
+    #game * {
+      box-sizing: border-box;
+    }
+
+    #game #gameFrame {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #000;
+    }
+
+    #game #gameTimer {
+      position: absolute;
+      top: 0;
+      right: 0;
+      z-index: 2;
+
+      width: min(380px, 100%);
+      height: 64px;
+      padding: 0 20px;
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      border-radius: 0 0 0 14px;
+      background: #111827;
+      color: #fff;
+
+      font-size: 26px;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      user-select: none;
+
+      box-shadow: -4px 4px 14px #0007;
+    }
+
+    #game #gameTimer.warning {
+      background: #dc2626;
+    }
+
+    #game #gameMask {
+      position: absolute;
+      inset: 0;
+      z-index: 3;
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      padding: 20px;
+      background: rgba(17, 24, 39, 0.96);
+    }
+
+    #game #gameBox {
+      width: 100%;
+      max-width: 340px;
+      padding: 28px;
+      border-radius: 16px;
+      background: #fff;
+      color: #111827;
+      text-align: center;
+    }
+
+    #game #gameBox h2 {
+      margin: 0 0 14px;
+      font-size: 24px;
+    }
+
+    #game #gameBox p {
+      line-height: 1.6;
+    }
+
+    #game #gameBox button {
+      width: 100%;
+      margin-top: 12px;
+      padding: 12px;
+      border: 0;
+      border-radius: 8px;
+      background: #2563eb;
+      color: #fff;
+      font-size: 18px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+
+<body>
+  <section id="entry">
+    <form id="password-form" hidden>
+      <label for="pw">請輸入入口密碼</label>
+
+      <input
+        id="pw"
+        type="password"
+        autocomplete="off"
+        required
+      >
+
+      <button id="btn" type="submit">
+        確認
+      </button>
+    </form>
+
+    <p
+      id="msg"
+      role="status"
+      aria-live="polite"
+    >驗證中… 00:00</p>
+  </section>
+
+  <main id="content"></main>
+
+  <!-- 所有遊戲共用這個版面 -->
+  <section id="game" hidden>
+    <iframe
+      id="gameFrame"
+      title="遊戲"
+      src="about:blank"
+      allow="autoplay; gamepad"
+    ></iframe>
+
+    <div id="gameTimer">準備中…</div>
+
+    <section
+      id="gameMask"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="gameLockTitle"
+      hidden
+    >
+      <div id="gameBox">
+        <h2 id="gameLockTitle">時間到</h2>
+
+        <p>
+          請重新輸入密碼，開始新的 1 分鐘。
+        </p>
+
+        <button id="retryGame" type="button">
+          重新輸入密碼
+        </button>
+      </div>
+    </section>
+  </section>
+
+  <script>
+    const GAS_URL =
+      'https://script.google.com/macros/s/AKfycbz3Rs4EI-Hv94HustCMrDWiUWXIcpyWlm8CyTc0Zv8KKYo7boiYUf8tsfgBwqANNTE/exec';
+
+    const PASS_KEY = 'pass_pw';
+    const PAGE_KEY = 'pass_page';
+
+    const PLAY_MS = 60 * 1000;
+    const WARNING_MS = 10 * 1000;
+
+    const entry = document.getElementById('entry');
+    const form = document.getElementById('password-form');
+    const pw = document.getElementById('pw');
+    const btn = document.getElementById('btn');
+    const msg = document.getElementById('msg');
+    const content = document.getElementById('content');
+
+    const game = document.getElementById('game');
+    const gameFrame = document.getElementById('gameFrame');
+    const gameTimer = document.getElementById('gameTimer');
+    const gameMask = document.getElementById('gameMask');
+    const retryGame = document.getElementById('retryGame');
+
+    const requestedId =
+      new URLSearchParams(location.search).get('p') || '';
+
+    const initialId =
+      requestedId ||
+      sessionStorage.getItem(PAGE_KEY) ||
+      '';
+
+    // 先取得 p，再清掉網址參數。
+    history.replaceState(null, '', '/s/');
+
+    let passwordValue =
+      sessionStorage.getItem(PASS_KEY) || '';
+
+    let loading = false;
+    let targetId = initialId;
+    let activeGameId = '';
+
+    let deadline = 0;
+    let timerId = 0;
+    let verifyingTimerId = 0;
+
+    function forgetPassword() {
+      passwordValue = '';
+      sessionStorage.removeItem(PASS_KEY);
+    }
+
+    function stopVerifyingTimer() {
+      clearInterval(verifyingTimerId);
+      verifyingTimerId = 0;
+    }
+
+    // 驗證等待時間：計算已經過多久。
+    function startVerifyingTimer() {
+      stopVerifyingTimer();
+
+      const startedAt = Date.now();
+
+      function update() {
+        const total = Math.floor(
+          (Date.now() - startedAt) / 1000
+        );
+
+        const minutes = String(
+          Math.floor(total / 60)
+        ).padStart(2, '0');
+
+        const seconds = String(
+          total % 60
+        ).padStart(2, '0');
+
+        msg.textContent =
+          '驗證中… ' + minutes + ':' + seconds;
+      }
+
+      update();
+
+      verifyingTimerId = setInterval(update, 250);
+    }
+
+    function stopGame() {
+      clearInterval(timerId);
+      timerId = 0;
+      deadline = 0;
+
+      gameFrame.src = 'about:blank';
+      game.hidden = true;
+      gameMask.hidden = true;
+
+      activeGameId = '';
+    }
+
+    function clearContent() {
+      stopGame();
+
+      content.replaceChildren();
+      content.className = '';
+      content.removeAttribute('style');
+
+      document.title = '課程入口';
+    }
+
+    function askPassword(message) {
+      stopVerifyingTimer();
+
+      entry.hidden = false;
+      form.hidden = false;
+
+      msg.textContent = message || '請輸入密碼。';
+
+      pw.value = '';
+      pw.focus();
+    }
+
+    // 拆解一般網址或 Google Docs 轉址。
+    function unwrapUrl(href) {
+      let url = new URL(href, location.href);
+
+      if (
+        url.hostname === 'www.google.com' &&
+        url.pathname === '/url'
+      ) {
+        const target =
+          url.searchParams.get('q') ||
+          url.searchParams.get('url');
+
+        if (target) {
+          url = new URL(target, location.href);
+        }
+      }
+
+      return url;
+    }
+
+    function isEntryUrl(url) {
+      return (
+        url.origin === location.origin &&
+        [
+          '/s/',
+          '/s/index.html',
+          '/s/index.htm'
+        ].includes(url.pathname)
+      );
+    }
+
+    // 還原連結，並設定另開新分頁。
+    function restoreLinks(doc) {
+      doc.querySelectorAll('a[href]').forEach(link => {
+        try {
+          const url = unwrapUrl(
+            link.getAttribute('href')
+          );
+
+          if (
+            !['http:', 'https:', 'mailto:', 'tel:']
+              .includes(url.protocol)
+          ) {
+            link.removeAttribute('href');
+            return;
+          }
+
+          const isEntry = isEntryUrl(url);
+
+          const id = isEntry
+            ? url.searchParams.get('p')
+            : null;
+
+          link.setAttribute(
+            'href',
+            id
+              ? './?p=' + encodeURIComponent(id)
+              : url.href
+          );
+
+          link.setAttribute('target', '_blank');
+
+          if (isEntry) {
+            // 遊戲（非 p 開頭）不沿用密碼，每次都重新驗證。
+            const isGameId = id !== null && !id.startsWith('p');
+            link.setAttribute(
+              'rel',
+              isGameId ? 'noopener' : 'opener'
+            );
+          } else {
+            link.setAttribute('rel', 'noopener noreferrer');
+          }
+
+        } catch {
+          link.removeAttribute('href');
+        }
+      });
+    }
+
+    // 一般教材：注入 style 與 body 內容。
+    function showHtml(html, title, dir) {
+      const doc = new DOMParser().parseFromString(
+        html,
+        'text/html'
+      );
+
+      doc.querySelectorAll(
+        'script, base, meta[http-equiv="refresh" i]'
+      ).forEach(element => element.remove());
+
+      doc.querySelectorAll('*').forEach(element => {
+        for (const attribute of [...element.attributes]) {
+          if (/^on/i.test(attribute.name)) {
+            element.removeAttribute(attribute.name);
+          }
+        }
+      });
+
+      restoreLinks(doc);
+
+      if (dir) {
+        doc.querySelectorAll('img[src]').forEach(img => {
+          const src = img.getAttribute('src');
+
+          if (/^(?:\.\/)?images\//.test(src)) {
+            img.setAttribute(
+              'src',
+              '/s/' +
+                dir +
+                '/' +
+                src.replace(/^\.\//, '')
+            );
+          }
+        });
+      }
+
+      const styles = [
+        ...doc.head.querySelectorAll('style')
+      ].map(style => {
+        const css = style.textContent.replace(
+          /(^|[{}\s,>+~])body(?![\w-])(?=[^{}]*\{)/g,
+          '$1#content'
+        );
+
+        const node = document.createElement('style');
+        node.textContent = css;
+
+        return node;
+      });
+
+      content.innerHTML = doc.body.innerHTML;
+      content.prepend(...styles);
+
+      content.className = doc.body.className;
+      content.style.cssText = doc.body.style.cssText;
+
+      document.title = title || '課程入口';
+      window.scrollTo(0, 0);
+    }
+
+    function lockGame() {
+      clearInterval(timerId);
+      timerId = 0;
+      deadline = 0;
+
+      if (
+        document.fullscreenElement &&
+        document.exitFullscreen
+      ) {
+        document.exitFullscreen().catch(() => {});
+      }
+
+      // 卸載遊戲，顯示時間到遮罩。
+      gameFrame.src = 'about:blank';
+
+      gameTimer.textContent = '時間到';
+      gameTimer.classList.remove('warning');
+
+      gameMask.hidden = false;
+      retryGame.focus();
+    }
+
+    function updateGameTime() {
+      if (!deadline || game.hidden) return;
+
+      const remaining = deadline - Date.now();
+
+      if (remaining <= 0) {
+        lockGame();
+        return;
+      }
+
+      const total = Math.ceil(remaining / 1000);
+      const minutes = Math.floor(total / 60);
+      const seconds = String(total % 60).padStart(2, '0');
+
+      gameTimer.textContent =
+        '剩餘 ' + minutes + ':' + seconds;
+
+      gameTimer.classList.toggle(
+        'warning',
+        remaining <= WARNING_MS
+      );
+    }
+
+    function showGame(url, id, title) {
+      activeGameId = id;
+
+      game.hidden = false;
+      gameMask.hidden = true;
+
+      gameFrame.title = title || '遊戲';
+      document.title = title || '遊戲';
+
+      // 每次驗證通過，都開始新的 60 秒。
+      // 到期時間不寫入儲存空間。
+      deadline = Date.now() + PLAY_MS;
+
+      // 直接使用 GAS 從 PAGES 回傳的網址。
+      gameFrame.src = url;
+
+      updateGameTime();
+
+      timerId = setInterval(updateGameTime, 250);
+    }
+
+    async function loadPage(id = '') {
+      if (loading) return;
+
+      loading = true;
+      targetId = id;
+
+      // 保留目標頁面，F5 後仍知道要進哪一頁。
+      if (id) {
+        sessionStorage.setItem(PAGE_KEY, id);
+      } else {
+        sessionStorage.removeItem(PAGE_KEY);
+      }
+
+      clearContent();
+
+      entry.hidden = false;
+      form.hidden = true;
+      btn.disabled = true;
+
+      startVerifyingTimer();
+
+      try {
+        const url = new URL(GAS_URL);
+
+        if (id) {
+          url.searchParams.set('p', id);
+        }
+
+        if (passwordValue) {
+          url.searchParams.set('pw', passwordValue);
+        }
+
+        url.searchParams.set(
+          '_',
+          Date.now().toString()
+        );
+
+        const response = await fetch(url, {
+          credentials: 'omit',
+          cache: 'no-store'
+        });
+
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status);
+        }
+
+        const data = await response.json();
+
+        stopVerifyingTimer();
+
+        if (data.status === 'need_password') {
+          forgetPassword();
+          askPassword('請輸入密碼。');
+          return;
+        }
+
+        if (
+          data.status !== 'ok' &&
+          data.status !== 'fail'
+        ) {
+          throw new Error(
+            data.message || '頁面讀取失敗'
+          );
+        }
+
+        const isGame =
+          data.status === 'ok' &&
+          data.view === 'game';
+
+        if (isGame) {
+          // 清除本分頁密碼，F5 必須重新輸入。
+          forgetPassword();
+
+          showGame(
+            data.url,
+            id,
+            data.title
+          );
+        } else {
+          if (
+            typeof data.html !== 'string' ||
+            typeof data.dir !== 'string'
+          ) {
+            throw new Error(
+              '後端沒有回傳完整教材資料'
+            );
+          }
+
+          showHtml(
+            data.html,
+            data.title,
+            data.dir
+          );
+        }
+
+        if (data.status === 'fail') {
+          forgetPassword();
+          sessionStorage.removeItem(PAGE_KEY);
+
+          // p09 顯示後，下一次入口驗證回首頁。
+          targetId = '';
+        } else if (!isGame && passwordValue) {
+          // 一般教材維持保存密碼的流程。
+          sessionStorage.setItem(
+            PASS_KEY,
+            passwordValue
+          );
+        }
+
+        entry.hidden = true;
+        pw.value = '';
+      } catch (error) {
+        console.error(error);
+
+        stopVerifyingTimer();
+        clearContent();
+
+        askPassword(
+          '載入失敗：' + error.message
+        );
+      } finally {
+        stopVerifyingTimer();
+
+        loading = false;
+        btn.disabled = false;
+      }
+    }
+
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+
+      if (loading) return;
+
+      passwordValue = pw.value;
+      loadPage(targetId);
+    });
+
+    retryGame.addEventListener('click', () => {
+      const id = activeGameId;
+
+      if (!id) return;
+
+      forgetPassword();
+      clearContent();
+
+      targetId = id;
+
+      askPassword(
+        '請重新輸入密碼，開始新的 1 分鐘。'
+      );
+    });
+
+    document.addEventListener('click', event => {
+      if (!(event.target instanceof Element)) return;
+
+      const button = event.target.closest(
+        '.fold-btn, .lock-btn'
+      );
+
+      if (button && content.contains(button)) {
+        event.preventDefault();
+
+        // 預留功能：目前不執行展摺或 Python 解鎖。
+        return;
+      }
+
+      // 不攔截超連結。
+      // 由 target="_blank" 另開新分頁。
+    });
+
+    document.addEventListener(
+      'visibilitychange',
+      () => {
+        if (!document.hidden) {
+          updateGameTime();
+        }
+      }
+    );
+
+    window.addEventListener(
+      'focus',
+      updateGameTime
+    );
+
+    window.addEventListener(
+      'pageshow',
+      updateGameTime
+    );
+
+    loadPage(initialId);
+  </script>
+</body>
+</html>

@@ -11,7 +11,7 @@
   <title>課程入口</title>
 
   <style>
-    /* 入口樣式：全部限定在 #entry 內 */
+    /* 入口樣式：限定在 #entry 內 */
     #entry {
       box-sizing: border-box;
       max-width: 360px;
@@ -210,7 +210,7 @@
 
   <script>
     const GAS_URL =
-      'https://script.google.com/macros/s/AKfycbz3Rs4EI-Hv94HustCMrDWiUWXIcpyWlm8CyTc0Zv8KKYo7boiYUf8tsfgBwqANNTE/exec';
+      'https://script.google.com/macros/s/AKfycby-aoL5wWQY-QrhBQPgQ0QuUX0f9PcFAEW4sr7VdzdAU2p7-BiufRxjX42byInW7UU/exec';
 
     const PASS_KEY = 'pass_pw';
     const PAGE_KEY = 'pass_page';
@@ -231,6 +231,7 @@
     const gameMask = document.getElementById('gameMask');
     const retryGame = document.getElementById('retryGame');
 
+    // 先取得 p，再清除網址參數。
     const requestedId =
       new URLSearchParams(location.search).get('p') || '';
 
@@ -239,7 +240,6 @@
       sessionStorage.getItem(PAGE_KEY) ||
       '';
 
-    // 先取得 p，再清掉網址參數。
     history.replaceState(null, '', '/s/');
 
     let passwordValue =
@@ -263,7 +263,7 @@
       verifyingTimerId = 0;
     }
 
-    // 驗證等待時間：計算已經過多久。
+    // 驗證等待時間：顯示已經過多久。
     function startVerifyingTimer() {
       stopVerifyingTimer();
 
@@ -293,6 +293,7 @@
 
     function stopGame() {
       clearInterval(timerId);
+
       timerId = 0;
       deadline = 0;
 
@@ -388,23 +389,28 @@
           link.setAttribute('target', '_blank');
 
           if (isEntry) {
-            // 遊戲（非 p 開頭）不沿用密碼，每次都重新驗證。
-            const isGameId = id !== null && !id.startsWith('p');
+            // 沿用目前命名規則：
+            // p 開頭為一般教材，其餘視為遊戲。
+            const isGameId =
+              id !== null && !id.startsWith('p');
+
             link.setAttribute(
               'rel',
               isGameId ? 'noopener' : 'opener'
             );
           } else {
-            link.setAttribute('rel', 'noopener noreferrer');
+            link.setAttribute(
+              'rel',
+              'noopener noreferrer'
+            );
           }
-
         } catch {
           link.removeAttribute('href');
         }
       });
     }
 
-    // 一般教材：注入 style 與 body 內容。
+    // 一般教材：只注入 style 與 body 內容。
     function showHtml(html, title, dir) {
       const doc = new DOMParser().parseFromString(
         html,
@@ -415,6 +421,7 @@
         'script, base, meta[http-equiv="refresh" i]'
       ).forEach(element => element.remove());
 
+      // 移除 onclick 等行內事件。
       doc.querySelectorAll('*').forEach(element => {
         for (const attribute of [...element.attributes]) {
           if (/^on/i.test(attribute.name)) {
@@ -425,6 +432,7 @@
 
       restoreLinks(doc);
 
+      // 圖片仍從 GitHub 的各頁資料夾讀取。
       if (dir) {
         doc.querySelectorAll('img[src]').forEach(img => {
           const src = img.getAttribute('src');
@@ -467,6 +475,7 @@
 
     function lockGame() {
       clearInterval(timerId);
+
       timerId = 0;
       deadline = 0;
 
@@ -499,7 +508,8 @@
 
       const total = Math.ceil(remaining / 1000);
       const minutes = Math.floor(total / 60);
-      const seconds = String(total % 60).padStart(2, '0');
+      const seconds = String(total % 60)
+        .padStart(2, '0');
 
       gameTimer.textContent =
         '剩餘 ' + minutes + ':' + seconds;
@@ -519,7 +529,7 @@
       gameFrame.title = title || '遊戲';
       document.title = title || '遊戲';
 
-      // 每次驗證通過，都開始新的 60 秒。
+      // 每次驗證通過，開始新的 60 秒。
       // 到期時間不寫入儲存空間。
       deadline = Date.now() + PLAY_MS;
 
@@ -537,7 +547,8 @@
       loading = true;
       targetId = id;
 
-      // 保留目標頁面，F5 後仍知道要進哪一頁。
+      // 正常載入時保留目前目標。
+      // 載入失敗時清除，讓 F5 回首頁。
       if (id) {
         sessionStorage.setItem(PAGE_KEY, id);
       } else {
@@ -574,23 +585,27 @@
         });
 
         if (!response.ok) {
-          throw new Error('HTTP ' + response.status);
+          throw new Error(
+            'HTTP ' + response.status
+          );
         }
 
         const data = await response.json();
 
         stopVerifyingTimer();
 
+        // 只有後端要求密碼時，才顯示密碼框。
         if (data.status === 'need_password') {
           forgetPassword();
           askPassword('請輸入密碼。');
           return;
         }
 
-        if (
-          data.status !== 'ok' &&
-          data.status !== 'fail'
-        ) {
+        const isFailure =
+          data.status === 'fail' ||
+          data.status === 'error';
+
+        if (data.status !== 'ok' && !isFailure) {
           throw new Error(
             data.message || '頁面讀取失敗'
           );
@@ -601,6 +616,12 @@
           data.view === 'game';
 
         if (isGame) {
+          if (typeof data.url !== 'string') {
+            throw new Error(
+              '後端沒有回傳遊戲網址'
+            );
+          }
+
           // 清除本分頁密碼，F5 必須重新輸入。
           forgetPassword();
 
@@ -615,10 +636,17 @@
             typeof data.dir !== 'string'
           ) {
             throw new Error(
-              '後端沒有回傳完整教材資料'
+              data.message ||
+              (
+                data.status === 'fail'
+                  ? '密碼錯誤'
+                  : '後端沒有回傳完整教材資料'
+              )
             );
           }
 
+          // 正常教材與 p09 都使用相同注入流程。
+          // p09 的動態訊息已由 GAS 插入，不重複加入。
           showHtml(
             data.html,
             data.title,
@@ -626,14 +654,13 @@
           );
         }
 
-        if (data.status === 'fail') {
+        if (isFailure) {
           forgetPassword();
           sessionStorage.removeItem(PAGE_KEY);
 
-          // p09 顯示後，下一次入口驗證回首頁。
           targetId = '';
         } else if (!isGame && passwordValue) {
-          // 一般教材維持保存密碼的流程。
+          // 一般教材保存已被 GAS 接受的輸入值。
           sessionStorage.setItem(
             PASS_KEY,
             passwordValue
@@ -648,9 +675,55 @@
         stopVerifyingTimer();
         clearContent();
 
-        askPassword(
-          '載入失敗：' + error.message
+        forgetPassword();
+        sessionStorage.removeItem(PAGE_KEY);
+        targetId = '';
+
+        // 網路或後端異常，不再要求輸入密碼。
+        entry.hidden = true;
+        form.hidden = true;
+        pw.value = '';
+
+        document.title = '載入失敗';
+
+        // 無法取得 p09 時的本機備援畫面。
+        const box = document.createElement('section');
+
+        box.style.cssText =
+          'max-width:720px;margin:28px auto;padding:20px;' +
+          'font-family:Arial,sans-serif;font-size:14pt;' +
+          'text-align:center;line-height:1.6;';
+
+        const detail = document.createElement('p');
+
+        const message = String(
+          error.message || '未知錯誤'
         );
+
+        detail.style.color = '#b00020';
+
+        // textContent 不會把錯誤訊息當成 HTML。
+        detail.textContent =
+          /^(載入失敗[：:]|密碼錯誤)/.test(message)
+            ? message
+            : '載入失敗：' + message;
+
+        const retry = document.createElement('p');
+
+        retry.style.color = '#0000ff';
+        retry.textContent =
+          '請按 F5 回到課程首頁';
+
+        const contact = document.createElement('p');
+
+        contact.style.color = '#0000ff';
+        contact.textContent =
+          '依舊報錯，請洽樂富 0922-402119';
+
+        box.append(detail, retry, contact);
+        content.replaceChildren(box);
+
+        window.scrollTo(0, 0);
       } finally {
         stopVerifyingTimer();
 
@@ -693,7 +766,8 @@
       if (button && content.contains(button)) {
         event.preventDefault();
 
-        // 預留功能：目前不執行展摺或 Python 解鎖。
+        // 預留功能：
+        // 展摺與 Python 解鎖尚未實作。
         return;
       }
 

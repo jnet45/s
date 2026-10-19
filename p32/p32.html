@@ -1,28 +1,49 @@
-<html><head><meta content="text/html; charset=UTF-8" http-equiv="content-type"><title>雲校_燈光2</title>
+<html><head><meta content="text/html; charset=UTF-8" http-equiv="content-type">
+<title>雲校_燈光2</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+
 <style>
-  /* 一般圖片：只縮小、不放大，裁切圖除外 */
-  img:not([style*="margin-left: -"], [style*="margin-left:-"], [style*="margin-top: -"], [style*="margin-top:-"]) {
+  /*
+   * 一般圖片：限制最大寬度，保持比例。
+   * 排除以下負 margin 格式的裁切圖。
+   */
+  img:not(
+    [style*="margin-left: -"],
+    [style*="margin-left:-"],
+    [style*="margin-top: -"],
+    [style*="margin-top:-"]
+  ) {
     max-width: 100% !important;
     height: auto !important;
   }
 
-  /* 圖片外層 span 不產生方塊，裁切圖除外 */
-  td span[style*="inline-block"]:not(:has(img[style*="margin-left: -"], img[style*="margin-left:-"], img[style*="margin-top: -"], img[style*="margin-top:-"])) {
+  /*
+   * 一般圖片外層 span 不產生固定尺寸方塊。
+   * 不刪除 HTML 元素；符合裁切條件的 span 保持原樣。
+   */
+  td span[style*="inline-block"]:not(:has(
+    img[style*="margin-left: -"],
+    img[style*="margin-left:-"],
+    img[style*="margin-top: -"],
+    img[style*="margin-top:-"]
+  )) {
     display: contents !important;
   }
 
-  /* 儲存格內的一般圖片置中，裁切圖除外 */
-  td img:not([style*="margin-left: -"], [style*="margin-left:-"], [style*="margin-top: -"], [style*="margin-top:-"]) {
-    display: block;
-    margin: 0 auto !important;
-  }
+  /*
+   * 不設定圖片 display:block 或 margin:auto。
+   * 由原本段落的 text-align 決定靠左、置中或靠右。
+   */
 
   /* 儲存格寬度包含內距與框線 */
-  td { box-sizing: border-box; }
+  td {
+    box-sizing: border-box;
+  }
 
-  /* 頁面水平置中 */
-  body { margin: 0 auto; }
+  /* 頁面水平置中，不更改段落對齊 */
+  body {
+    margin: 0 auto;
+  }
 
   /* 關閉 Google 匯出的自訂編號 */
   ol[class*="lst-kix_"] > li::before {
